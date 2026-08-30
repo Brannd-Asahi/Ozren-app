@@ -1,7 +1,7 @@
 {
-  "name": "Mi Rutina de Entrenamiento",
-  "short_name": "Mi Rutina",
-  "description": "Rutina de entrenamiento personal con checkboxes, cronómetro y registro histórico de sesiones.",
+  "name": "Ozren — Rutina de Entrenamiento",
+  "short_name": "Ozren",
+  "description": "Rutina de entrenamiento personal, sincronizada entre tus dispositivos.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

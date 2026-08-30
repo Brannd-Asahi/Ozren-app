@@ -1,13 +1,15 @@
 // Datos de la rutina — mismo nivel de detalle que las plantillas del Registro de Sesiones en Notion
-const DAY_TYPES = {
+export const DAY_TYPES = {
   empuje: { label: "Empuje", color: "#7B2D3E" },   // vino
-  traccion: { label: "Tracción", color: "#C79A2E" }, // amarillo suave, no alerta
+  traccion: { label: "Tracción", color: "#A57F1F" }, // amarillo suave, no alerta
   pierna: { label: "Pierna", color: "#3B6E8F" },   // azul
+  descanso: { label: "Descanso", color: "#6B6552" },
 };
 
-const DAYS = {
+// weekday: 0=domingo, 1=lunes ... 6=sábado — para auto-selección según el día real
+export const DAYS = {
   d1: {
-    id: "d1", order: 1, label: "Día 1", subtitle: "Empuje A", type: "empuje",
+    id: "d1", order: 1, label: "Día 1", subtitle: "Empuje A", type: "empuje", weekday: 1,
     focus: "Pecho · Hombro · Tríceps",
     warmup: [
       "Trote suave en el sitio o saltos ligeros — 2 min",
@@ -68,7 +70,7 @@ const DAYS = {
   },
 
   d2: {
-    id: "d2", order: 2, label: "Día 2", subtitle: "Tracción A", type: "traccion",
+    id: "d2", order: 2, label: "Día 2", subtitle: "Tracción A", type: "traccion", weekday: 2,
     focus: "Espalda · Bíceps · Antebrazo",
     warmup: [
       "Trote suave en el sitio — 2 min",
@@ -96,7 +98,7 @@ const DAYS = {
         name: "Remo a una mano",
         postura: "Rodilla y mano del mismo lado apoyadas en el banco, espalda paralela al piso, sin rotar hacia ningún lado.",
         ejecucion: "El codo va pegado al cuerpo, jalando hacia atrás y ligeramente hacia la cadera. Al llegar arriba, aprieta el omóplato. Baja completo, sintiendo el estiramiento del dorsal.",
-        sets: 3, reps: "10/lado", techo: 13, rest: 90,
+        sets: 3, reps: "10/lado", techo: 13, rest: 90, unilateral: true, ladoLabel: ["Izquierda", "Derecha"],
       },
       {
         name: "Pájaros (deltoide posterior)",
@@ -133,7 +135,7 @@ const DAYS = {
         postura: "Brazo completamente apoyado en la almohadilla del predicador, agarre supino, empezando casi extendido.",
         ejecucion: "Sube flexionando solo el codo, sin despegar el brazo de la almohadilla. Aprieta arriba, baja contando 3 segundos sintiendo el estiramiento.",
         extra: "Accesorio extra — aísla el bíceps desde un ángulo distinto al curl de pie.",
-        sets: 2, reps: "10/brazo", techo: 13, rest: 60,
+        sets: 2, reps: "10/brazo", techo: 13, rest: 60, unilateral: true, ladoLabel: ["Izquierdo", "Derecho"],
       },
     ],
     stretch: [
@@ -144,7 +146,7 @@ const DAYS = {
   },
 
   d3: {
-    id: "d3", order: 3, label: "Día 3", subtitle: "Pierna A", type: "pierna",
+    id: "d3", order: 3, label: "Día 3", subtitle: "Pierna A", type: "pierna", weekday: 3,
     focus: "Cuádriceps · Isquiotibial · Pantorrilla · Core",
     warmup: [
       "Trote suave en el sitio o step-ups sin peso — 2-3 min",
@@ -167,13 +169,13 @@ const DAYS = {
         name: "Zancada búlgara",
         postura: "Pie trasero apoyado en el banco (empeine, no la punta), pie delantero a distancia suficiente para que la rodilla no se pase de la punta del pie al bajar.",
         ejecucion: "Torso ligeramente inclinado hacia adelante, abdomen apretado. Baja controlado hasta que la rodilla trasera casi toque el piso, peso principalmente en el talón de la pierna delantera. Empuja con ese talón para subir.",
-        sets: 3, reps: "10/pierna", techo: 13, rest: 90,
+        sets: 3, reps: "10/pierna", techo: 13, rest: 90, unilateral: true, ladoLabel: ["Izquierda", "Derecha"],
       },
       {
         name: "Step-ups",
         postura: "De pie frente al banco, altura de rodilla o un poco más baja.",
         ejecucion: "Sube completamente con una pierna hasta quedar de pie sobre el banco, extendiendo la cadera por completo arriba, sin empujarte con la pierna que queda abajo. Baja controlado, sin dejarte caer de golpe.",
-        sets: 3, reps: "12/pierna", techo: 15, rest: 90,
+        sets: 3, reps: "12/pierna", techo: 15, rest: 90, unilateral: true, ladoLabel: ["Izquierda", "Derecha"],
       },
       {
         name: "🆕 Extensión de pierna (módulo K6)",
@@ -209,7 +211,7 @@ const DAYS = {
   },
 
   d5: {
-    id: "d5", order: 4, label: "Día 5", subtitle: "Empuje B", type: "empuje",
+    id: "d5", order: 4, label: "Día 5", subtitle: "Empuje B", type: "empuje", weekday: 5,
     focus: "Pecho superior · Hombro (3 ángulos) · Tríceps",
     warmup: [
       "Trote suave o saltos ligeros — 2 min",
@@ -260,7 +262,7 @@ const DAYS = {
   },
 
   d6: {
-    id: "d6", order: 5, label: "Día 6", subtitle: "Tracción B", type: "traccion",
+    id: "d6", order: 5, label: "Día 6", subtitle: "Tracción B", type: "traccion", weekday: 6,
     focus: "Espalda (ángulo distinto) · Bíceps (aislamiento) · Antebrazo",
     warmup: [
       "Trote suave — 2 min",
@@ -292,7 +294,7 @@ const DAYS = {
         name: "Curl concentrado",
         postura: "Sentado, codo apoyado en la cara interna del muslo del mismo lado, brazo colgando hacia el piso.",
         ejecucion: "Sube flexionando solo el codo, sin mover el hombro ni el torso — el apoyo en el muslo elimina el impulso, mayor aislamiento del bíceps de toda tu rutina.",
-        sets: 2, reps: "12/brazo", techo: 15, rest: 60,
+        sets: 2, reps: "12/brazo", techo: 15, rest: 60, unilateral: true, ladoLabel: ["Izquierdo", "Derecho"],
       },
       {
         name: "Dead hang",
@@ -309,7 +311,7 @@ const DAYS = {
   },
 
   d7: {
-    id: "d7", order: 6, label: "Día 7", subtitle: "Pierna B", type: "pierna",
+    id: "d7", order: 6, label: "Día 7", subtitle: "Pierna B", type: "pierna", weekday: 0,
     focus: "Cadera · Glúteo · Pantorrilla · Core",
     warmup: [
       "Trote suave en el sitio — 2 min",
@@ -337,7 +339,7 @@ const DAYS = {
         name: "Zancada lateral (curtsy lunge)",
         postura: "De pie, posición inicial normal.",
         ejecucion: "Da un paso cruzando una pierna por detrás de la otra en diagonal, baja flexionando ambas rodillas hasta sentir el trabajo en glúteo medio, vuelve al centro empujando con la pierna delantera.",
-        sets: 3, reps: "10/lado", techo: 13, rest: 90,
+        sets: 3, reps: "10/lado", techo: 13, rest: 90, unilateral: true, ladoLabel: ["Izquierda", "Derecha"],
       },
       {
         name: "🆕 Extensión de pierna (módulo K6)",
@@ -372,4 +374,17 @@ const DAYS = {
   },
 };
 
-const DAY_ORDER = ["d1", "d2", "d3", "d5", "d6", "d7"];
+export const DAY_ORDER = ["d1", "d2", "d3", "d5", "d6", "d7"];
+
+export const REST_DAY = {
+  id: "descanso", order: 3.5, label: "Día 4", subtitle: "Descanso", type: "descanso", weekday: 4,
+  focus: "Recuperación activa",
+  tips: [
+    "Movimiento ligero: caminar, estirar — nada de carga.",
+    "Prioriza proteína suficiente e hidratación.",
+    "Buen sueño: aquí se repara y crece el músculo, no en el gimnasio.",
+  ],
+};
+
+// Mapa weekday → id de rutina (para auto-selección). 4 = jueves = descanso.
+export const WEEKDAY_TO_DAY = { 1: "d1", 2: "d2", 3: "d3", 4: "descanso", 5: "d5", 6: "d6", 0: "d7" };

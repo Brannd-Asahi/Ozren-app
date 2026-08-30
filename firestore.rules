@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// Reglas de seguridad de Firestore para "Ozren".
+// Cada persona autenticada solo puede leer y escribir DENTRO de su propio
+// documento de usuario (usuarios/{uid}/...). Nadie puede ver ni tocar los
+// datos de otra cuenta, ni siquiera si conoce el uid.
+//
+// Si reutilizas el mismo proyecto de Firebase que "Sattva", estas reglas
+// son compatibles y NO necesitas reemplazar las que ya publicaste — el
+// patrón usuarios/{uid}/{documento=**} ya cubre también las colecciones
+// nuevas de Ozren ("entrenamiento", "progreso").
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /usuarios/{uid}/{documento=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Todo lo demás queda bloqueado por defecto.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
