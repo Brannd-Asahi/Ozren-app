@@ -1,19 +1,8 @@
-// ============================================================
-// Reemplaza este objeto por el que te da Firebase en:
-// Project settings → tu app web → "SDK setup and configuration"
-// Ver FIREBASE_SETUP.md, paso 4.
-//
-// Si ya tienes un proyecto de Firebase para "Sattva" y quieres reutilizarlo
-// (un solo login para ambas apps), copia EXACTAMENTE el mismo objeto que
-// usaste en el firebase-config.js de Sattva — no hace falta crear un
-// proyecto nuevo. Ozren guarda sus datos en una colección distinta
-// ("entrenamiento" en vez de "registros"), así que no chocan entre sí.
-// ============================================================
-export const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID",
+const firebaseConfig = {
+  apiKey: "AIzaSyAmLrseDJOC89JllPxPlWQkRAMvRRd_zsc",
+  authDomain: "askesis-f15e5.firebaseapp.com",
+  projectId: "askesis-f15e5",
+  storageBucket: "askesis-f15e5.firebasestorage.app",
+  messagingSenderId: "745069133273",
+  appId: "1:745069133273:web:2846b508bce6159da7edc8"
 };
