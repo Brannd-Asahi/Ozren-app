@@ -1,19 +1,18 @@
 // ============================================================
 // Datos de la app — arquitectura multi-plan.
-// PLAN 1: el original de 6 días (Empuje/Tracción/Pierna x2) — conservado
-//         como archivo histórico, seleccionable pero ya no el activo.
-// PLAN 2: el nuevo de 4 días (Superior/Inferior x2, anclado a días
-//         reales de la semana) — activo por defecto.
+// Cada día (incluidos los de descanso) es una entrada normal en
+// plan.days, con weekday real (0=domingo...6=sábado) — el orden en
+// listas y selectores se calcula siempre a partir de weekday, nunca
+// de la posición en el objeto.
 // ============================================================
 
-// ---------- TIPOS DE DÍA (colores semánticos, iguales en ambos planes) ----------
 export const DAY_TYPE_COLORS = {
-  empuje: "#7B2D3E",    // vino
-  traccion: "#A57F1F",  // amarillo suave
-  pierna: "#3B6E8F",    // azul
-  superior: "#7B2D3E",  // reutiliza vino (empuje = tren superior de fuerza)
-  inferior: "#3B6E8F",  // reutiliza azul
-  opcional: "#8C7D5E",  // tono neutro cálido, discreto
+  empuje: "#7B2D3E",
+  traccion: "#A57F1F",
+  pierna: "#3B6E8F",
+  superior: "#7B2D3E",
+  inferior: "#3B6E8F",
+  opcional: "#8C7D5E",
   descanso: "#6B6552",
 };
 
@@ -22,7 +21,7 @@ export const DAY_TYPE_COLORS = {
 // ============================================================
 const plan1Days = {
   d1: {
-    id: "d1", order: 1, label: "Lunes", subtitle: "Empuje A", type: "empuje", weekday: 1,
+    id: "d1", label: "Lunes", subtitle: "Empuje A", type: "empuje", weekday: 1,
     focus: "Pecho · Hombro · Tríceps",
     warmup: [
       "Trote suave en el sitio o saltos ligeros — 2 min",
@@ -44,7 +43,7 @@ const plan1Days = {
     stretch: ["Pectoral en marco de puerta — 20-30 segundos por lado", "Tríceps, brazo detrás de la cabeza — 20-30 segundos por lado", "Hombro cruzado al pecho — 20-30 segundos por lado"],
   },
   d2: {
-    id: "d2", order: 2, label: "Martes", subtitle: "Tracción A", type: "traccion", weekday: 2,
+    id: "d2", label: "Martes", subtitle: "Tracción A", type: "traccion", weekday: 2,
     focus: "Espalda · Bíceps · Antebrazo",
     warmup: ["Trote suave en el sitio — 2 min", "Dead hang ligero de la barra (colgarte sin hacer fuerza) — 2 series de 15-20 segundos", "Retracciones escapulares sin peso — 10-15 veces", "Rotaciones externas de hombro — 10-12 repeticiones", "Plancha corta — 20-30 segundos"],
     exercises: [
@@ -61,7 +60,7 @@ const plan1Days = {
     stretch: ["Dorsal en barra (colgado relajado) — 20-30 segundos", "Bíceps contra pared — 20-30 segundos por lado", "Hombro cruzado al pecho — 20-30 segundos por lado"],
   },
   d3: {
-    id: "d3", order: 3, label: "Miércoles", subtitle: "Pierna A", type: "pierna", weekday: 3,
+    id: "d3", label: "Miércoles", subtitle: "Pierna A", type: "pierna", weekday: 3,
     focus: "Cuádriceps · Isquiotibial · Pantorrilla · Core",
     warmup: ["Trote suave en el sitio o step-ups sin peso — 2-3 min", "Sentadilla profunda sin peso, sostenida 20-30 segundos", "Círculos de cadera — 10 por lado", "Zancadas caminando sin peso — 8-10 pasos por pierna", "Puente de glúteo sin peso — 15 repeticiones", "Plancha corta — 20-30 segundos", "Serie de aproximación: 8-10 repeticiones con poco peso en sentadilla"],
     exercises: [
@@ -75,8 +74,13 @@ const plan1Days = {
     ],
     stretch: ["Cuádriceps de pie (sostener el tobillo detrás) — 20-30 segundos por lado", "Isquiotibial sentado (pierna extendida, alcanzar el pie) — 20-30 segundos por lado", "Pantorrilla contra la pared — 20-30 segundos por lado"],
   },
+  descanso: {
+    id: "descanso", label: "Jueves", subtitle: "Descanso", type: "descanso", weekday: 4,
+    focus: "Recuperación activa",
+    tips: ["Movimiento ligero: caminar, estirar — nada de carga.", "Prioriza proteína suficiente e hidratación.", "Buen sueño: aquí se repara y crece el músculo, no en el gimnasio."],
+  },
   d5: {
-    id: "d5", order: 4, label: "Viernes", subtitle: "Empuje B", type: "empuje", weekday: 5,
+    id: "d5", label: "Viernes", subtitle: "Empuje B", type: "empuje", weekday: 5,
     focus: "Pecho superior · Hombro (3 ángulos) · Tríceps",
     warmup: ["Trote suave o saltos ligeros — 2 min", "Círculos de brazos, 10 adelante y 10 atrás", "Rotaciones externas de hombro — 10-12 repeticiones", "Estiramiento de pectoral en marco de puerta — 20-30 segundos por lado", "Plancha corta — 20-30 segundos", "Serie de aproximación: 8-10 repeticiones ligeras en press inclinado"],
     exercises: [
@@ -89,7 +93,7 @@ const plan1Days = {
     stretch: ["Pectoral en marco de puerta — 20-30 segundos por lado", "Tríceps, brazo detrás de la cabeza — 20-30 segundos por lado", "Hombro cruzado al pecho — 20-30 segundos por lado"],
   },
   d6: {
-    id: "d6", order: 5, label: "Sábado", subtitle: "Tracción B", type: "traccion", weekday: 6,
+    id: "d6", label: "Sábado", subtitle: "Tracción B", type: "traccion", weekday: 6,
     focus: "Espalda (ángulo distinto) · Bíceps (aislamiento) · Antebrazo",
     warmup: ["Trote suave — 2 min", "Dead hang ligero — 2 series de 15-20 segundos", "Retracciones escapulares sin peso — 10-15 veces", "Rotaciones externas de hombro — 10-12 repeticiones"],
     exercises: [
@@ -102,7 +106,7 @@ const plan1Days = {
     stretch: ["Dorsal en barra (colgado relajado) — 20-30 segundos", "Bíceps contra pared — 20-30 segundos por lado", "Hombro cruzado al pecho — 20-30 segundos por lado"],
   },
   d7: {
-    id: "d7", order: 6, label: "Domingo", subtitle: "Pierna B", type: "pierna", weekday: 0,
+    id: "d7", label: "Domingo", subtitle: "Pierna B", type: "pierna", weekday: 0,
     focus: "Cadera · Glúteo · Pantorrilla · Core",
     warmup: ["Trote suave en el sitio — 2 min", "Puente de glúteo sin peso — 15 repeticiones", "Círculos de cadera — 10 por lado", "Peso muerto rumano sin peso, sostenido — 5-6 repeticiones lentas", "Zancada caminando sin peso — 8 pasos por pierna", "Plancha corta — 20-30 segundos"],
     exercises: [
@@ -118,28 +122,33 @@ const plan1Days = {
   },
 };
 
-const plan1RestDay = {
-  id: "descanso", order: 3.5, label: "Jueves", subtitle: "Descanso", type: "descanso", weekday: 4,
-  focus: "Recuperación activa",
-  tips: ["Movimiento ligero: caminar, estirar — nada de carga.", "Prioriza proteína suficiente e hidratación.", "Buen sueño: aquí se repara y crece el músculo, no en el gimnasio."],
-};
-
 export const PLAN_1 = {
   id: "plan1",
   nombre: "Plan 1 · Empuje / Tracción / Pierna (6 días)",
   descripcion: "El plan original con el que empezaste — Lunes a Domingo, solo Jueves de descanso. Conservado como archivo histórico.",
   days: plan1Days,
-  dayOrder: ["d1", "d2", "d3", "d5", "d6", "d7"],
-  restDay: plan1RestDay,
   weekdayMap: { 1: "d1", 2: "d2", 3: "d3", 4: "descanso", 5: "d5", 6: "d6", 0: "d7" },
 };
 
 // ============================================================
 // PLAN 2 — Superior / Inferior (4 días fijos + 1 opcional) — ACTIVO
+// Lunes y Martes son dos días de descanso SEPARADOS (misma pantalla,
+// mismo contenido), no uno compartido — así cada uno queda registrado
+// de forma independiente en el historial.
 // ============================================================
 const plan2Days = {
+  descanso_lunes: {
+    id: "descanso_lunes", label: "Lunes", subtitle: "Descanso fijo", type: "descanso", weekday: 1,
+    focus: "Protegido intencionalmente — trabajo + clase hasta las 9:30pm",
+    tips: ["Este día se deja sin entrenar a propósito, para proteger el sueño en tu semana más exigente.", "Un entrenamiento aquí no mejora el resultado semanal — la evidencia dice que el volumen total importa más que repartirlo en más días.", "Aprovecha para dormir bien, comer suficiente proteína, y llegar descansado al miércoles."],
+  },
+  descanso_martes: {
+    id: "descanso_martes", label: "Martes", subtitle: "Descanso fijo", type: "descanso", weekday: 2,
+    focus: "Protegido intencionalmente — trabajo + clase hasta las 9:30pm",
+    tips: ["Este día se deja sin entrenar a propósito, para proteger el sueño en tu semana más exigente.", "Un entrenamiento aquí no mejora el resultado semanal — la evidencia dice que el volumen total importa más que repartirlo en más días.", "Aprovecha para dormir bien, comer suficiente proteína, y llegar descansado al miércoles."],
+  },
   sup_a: {
-    id: "sup_a", order: 1, label: "Miércoles", subtitle: "Superior A", type: "superior", weekday: 3,
+    id: "sup_a", label: "Miércoles", subtitle: "Superior A", type: "superior", weekday: 3,
     focus: "Pecho · Espalda · Hombro · Bíceps",
     warmup: ["Trote suave en el sitio o saltos ligeros — 2 min", "Círculos de brazos, 10 adelante y 10 atrás", "Rotaciones externas de hombro — 10-12 repeticiones", "Retracciones escapulares sin peso — 10-15 veces", "Dead hang ligero — 2 series de 15-20 segundos", "Plancha corta — 20-30 segundos"],
     exercises: [
@@ -156,8 +165,19 @@ const plan2Days = {
     ],
     stretch: ["Pectoral en marco de puerta — 20-30 segundos por lado", "Dorsal en barra (colgado relajado) — 20-30 segundos", "Hombro cruzado al pecho — 20-30 segundos por lado"],
   },
+  opcional_jueves: {
+    id: "opcional_jueves", label: "Jueves", subtitle: "Opcional", type: "opcional", weekday: 4,
+    focus: "Bíceps · Hombro lateral · Core — solo si hoy tienes el margen real",
+    warmup: ["Círculos de brazos — 10 adelante y 10 atrás", "Rotaciones externas de hombro — 8-10 repeticiones"],
+    exercises: [
+      { name: "Curl martillo", postura: "De pie, mancuernas con agarre neutro (palmas mirándose), codos pegados al torso.", ejecucion: "Sube con flexión de codo, sin balancear el hombro. Baja controlado.", sets: 3, reps: "10-12", techo: 15, rest: 60 },
+      { name: "Elevación lateral", postura: "De pie, torso vertical y quieto, hombros abajo.", ejecucion: "Codo lidera por encima de la muñeca, sube hasta la altura del hombro, sin impulso de cadera. Baja controlado.", sets: 3, reps: "12-15", techo: 18, rest: 60 },
+      { name: "Plancha", postura: "Antebrazos apoyados, codos bajo los hombros, línea recta cabeza-talones.", ejecucion: "Aprieta glúteo y abdomen con fuerza — no dejes caer la cadera.", sets: 3, reps: "30-45 seg", techo: null, rest: 40 },
+    ],
+    stretch: ["Bíceps contra pared — 20-30 segundos por lado", "Hombro cruzado al pecho — 20-30 segundos por lado"],
+  },
   inf_a: {
-    id: "inf_a", order: 2, label: "Viernes", subtitle: "Inferior A", type: "inferior", weekday: 5,
+    id: "inf_a", label: "Viernes", subtitle: "Inferior A", type: "inferior", weekday: 5,
     focus: "Cuádriceps · Isquiotibial · Pantorrilla · Core",
     warmup: ["Trote suave o step-ups sin peso — 2-3 min", "Sentadilla profunda sin peso, sostenida 20-30 segundos", "Círculos de cadera — 10 por lado", "Zancadas caminando sin peso — 8-10 pasos por pierna", "Puente de glúteo sin peso — 15 repeticiones", "Serie de aproximación: 8-10 reps con poco peso en sentadilla"],
     exercises: [
@@ -172,7 +192,7 @@ const plan2Days = {
     stretch: ["Cuádriceps de pie — 20-30 segundos por lado", "Isquiotibial sentado — 20-30 segundos por lado", "Pantorrilla contra la pared — 20-30 segundos por lado"],
   },
   sup_b: {
-    id: "sup_b", order: 3, label: "Sábado", subtitle: "Superior B", type: "superior", weekday: 6,
+    id: "sup_b", label: "Sábado", subtitle: "Superior B", type: "superior", weekday: 6,
     focus: "Pecho (ángulo distinto) · Espalda · Hombro (3 ángulos) · Bíceps",
     warmup: ["Trote suave — 2 min", "Círculos de brazos — 10 adelante y 10 atrás", "Rotaciones externas de hombro — 10-12 repeticiones", "Dead hang ligero — 2 series de 15-20 segundos"],
     exercises: [
@@ -190,7 +210,7 @@ const plan2Days = {
     stretch: ["Pectoral en marco de puerta — 20-30 segundos por lado", "Dorsal en barra (colgado relajado) — 20-30 segundos", "Hombro cruzado al pecho — 20-30 segundos por lado"],
   },
   inf_b: {
-    id: "inf_b", order: 4, label: "Domingo", subtitle: "Inferior B", type: "inferior", weekday: 0,
+    id: "inf_b", label: "Domingo", subtitle: "Inferior B", type: "inferior", weekday: 0,
     focus: "Cadera · Glúteo · Pantorrilla · Core",
     warmup: ["Trote suave — 2 min", "Puente de glúteo sin peso — 15 repeticiones", "Círculos de cadera — 10 por lado", "Zancada caminando sin peso — 8 pasos por pierna", "Plancha corta — 20-30 segundos"],
     exercises: [
@@ -203,49 +223,27 @@ const plan2Days = {
     ],
     stretch: ["Isquiotibial sentado — 20-30 segundos por lado", "Glúteo cruzado (rodilla al pecho, cruzada) — 20-30 segundos por lado", "Pantorrilla contra la pared — 20-30 segundos por lado"],
   },
-  opcional_jueves: {
-    id: "opcional_jueves", order: 5, label: "Jueves", subtitle: "Opcional", type: "opcional", weekday: 4,
-    focus: "Bíceps · Hombro lateral · Core — solo si hoy tienes el margen real",
-    esOpcional: true,
-    warmup: ["Círculos de brazos — 10 adelante y 10 atrás", "Rotaciones externas de hombro — 8-10 repeticiones"],
-    exercises: [
-      { name: "Curl martillo", postura: "De pie, mancuernas con agarre neutro (palmas mirándose), codos pegados al torso.", ejecucion: "Sube con flexión de codo, sin balancear el hombro. Baja controlado.", sets: 3, reps: "10-12", techo: 15, rest: 60 },
-      { name: "Elevación lateral", postura: "De pie, torso vertical y quieto, hombros abajo.", ejecucion: "Codo lidera por encima de la muñeca, sube hasta la altura del hombro, sin impulso de cadera. Baja controlado.", sets: 3, reps: "12-15", techo: 18, rest: 60 },
-      { name: "Plancha", postura: "Antebrazos apoyados, codos bajo los hombros, línea recta cabeza-talones.", ejecucion: "Aprieta glúteo y abdomen con fuerza — no dejes caer la cadera.", sets: 3, reps: "30-45 seg", techo: null, rest: 40 },
-    ],
-    stretch: ["Bíceps contra pared — 20-30 segundos por lado", "Hombro cruzado al pecho — 20-30 segundos por lado"],
-  },
-};
-
-const plan2RestDay = {
-  id: "descanso", order: 0, label: "Lunes / Martes", subtitle: "Descanso fijo", type: "descanso", weekday: 1,
-  focus: "Protegido intencionalmente — trabajo + clase hasta las 9:30pm",
-  tips: ["Estos dos días se dejan sin entrenar a propósito, para proteger el sueño en tu semana más exigente.", "Un entrenamiento aquí no mejora el resultado semanal — la evidencia dice que el volumen total importa más que repartirlo en más días.", "Aprovecha para dormir bien, comer suficiente proteína, y llegar descansado al miércoles."],
 };
 
 export const PLAN_2 = {
   id: "plan2",
   nombre: "Plan 2 · Superior / Inferior (4 días)",
-  descripcion: "El plan actual — anclado a Miércoles, Viernes, Sábado y Domingo, con Jueves opcional. Diseñado para tu horario real de trabajo + estudio.",
+  descripcion: "El plan actual — anclado a Miércoles, Viernes, Sábado y Domingo, con Jueves opcional y Lunes/Martes de descanso fijo. Diseñado para tu horario real de trabajo + estudio.",
   days: plan2Days,
-  dayOrder: ["sup_a", "inf_a", "sup_b", "inf_b", "opcional_jueves"],
-  restDay: plan2RestDay,
-  weekdayMap: { 1: "descanso", 2: "descanso", 3: "sup_a", 4: "opcional_jueves", 5: "inf_a", 6: "sup_b", 0: "inf_b" },
+  weekdayMap: { 1: "descanso_lunes", 2: "descanso_martes", 3: "sup_a", 4: "opcional_jueves", 5: "inf_a", 6: "sup_b", 0: "inf_b" },
 };
 
 export const PLANS = { plan1: PLAN_1, plan2: PLAN_2 };
 export const DEFAULT_PLAN_ID = "plan2";
 
 // ============================================================
-// TEMAS VISUALES — recreados a partir de la paleta real de Sattva,
-// adaptados a las variables CSS que ya usa esta app.
+// TEMAS VISUALES — recreados a partir de la paleta real de Sattva.
+// Champán y Dorado Solar se eliminaron por ser redundantes entre sí.
 // ============================================================
 export const TEMAS = [
   { id: "base", nombre: "Tema Base", color: "#D97757" },
   { id: "japones-shu", nombre: "Japonés · Shu", color: "#B33B2C" },
   { id: "oro-negro", nombre: "Oro sobre negro", color: "#C9A24B" },
   { id: "neumorfismo", nombre: "Neumorfismo soft UI", color: "#C08A63" },
-  { id: "dorado-champan", nombre: "Champán · luz de día", color: "#A9812E" },
-  { id: "dorado-solar", nombre: "Dorado Solar", color: "#C9860F" },
   { id: "dashboard-completo", nombre: "Dashboard completo", color: "#E2623C" },
 ];
