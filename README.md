@@ -1,53 +1,47 @@
-# Ozren — v2.0 (con sincronización)
+# Ozren — v3.0 (multi-plan + temas + sync en tiempo real)
 
-App de rutina de entrenamiento, PWA instalable, con datos en Firebase
-(Authentication + Firestore) para que se sincronicen automáticamente entre
-tus dispositivos.
+App de rutina de entrenamiento, PWA instalable, con Firebase (Authentication
++ Firestore) para sincronización en tiempo real entre tus dispositivos.
 
-## Antes de publicarla: configura Firebase
+## Tu firebase-config.js ya está configurado
 
-La app no funciona todavía porque `firebase-config.js` tiene datos de
-ejemplo. Sigue **`FIREBASE_SETUP.md`** paso a paso y:
-
-1. Reemplaza el contenido de `firebase-config.js` con tu configuración real
-   (o el mismo que ya usas en Sattva, si quieres compartir un solo login).
-2. Publica las reglas de `firestore.rules` en la consola de Firebase
-   (si ya las publicaste con Sattva usando el mismo patrón, no hace falta
-   repetirlo).
-
-Sin esto, la pantalla de inicio de sesión carga pero no puede crear tu
-cuenta ni guardar nada.
+Este paquete ya trae tu configuración real de Firebase (proyecto
+`askesis-f15e5`) — no necesitas volver a pegarla. Si vas a crear un
+proyecto nuevo en el futuro, sigue `FIREBASE_SETUP.md`.
 
 ## Cómo publicarla (GitHub Pages)
 
-Mismo flujo que ya usaste con la versión anterior: GitHub Desktop → copiar
-estos archivos dentro del repositorio local → Commit → Push → activar
-Pages en Settings.
-
-No olvides el paso 6 de `FIREBASE_SETUP.md` (autorizar el dominio de
-GitHub Pages en Firebase) — sin eso, el botón de Google falla.
+Mismo flujo de siempre: GitHub Desktop → reemplaza el contenido de tu
+repositorio local con estos archivos → Commit → Push. Como cambió el
+`CACHE_NAME` del service worker (a `ozren-v3`), la próxima vez que abras
+la app va a descargar la versión nueva sola — si por algún motivo sigue
+viéndose la vieja, borra los datos del sitio en Chrome una vez.
 
 ## Qué cambió en esta versión
 
-- **Sincronización real** entre dispositivos vía Firebase — inicia sesión
-  con el mismo correo en cualquier teléfono y tu historial aparece ahí.
-- Funciona offline: los cambios se guardan localmente y se sincronizan
-  solos al recuperar conexión.
-- Letras más grandes en toda la app.
-- Botón "Completar sesión" fijo en la parte inferior, siempre visible.
-- Cronómetro: azul mientras cuenta, rojo con alarma continua al terminar
-  hasta que lo detienes manualmente (nota: el navegador no puede forzar el
-  volumen del sistema, solo suena al volumen más alto posible dentro del
-  volumen que ya tenga el teléfono).
-- Ejercicios de un solo lado (zancada búlgara, step-ups, remo a una mano,
-  curl predicador, curl concentrado, zancada lateral) ahora preguntan si
-  los hiciste alternado o simultáneo, y ajustan las casillas de marcar.
-- Día de descanso (Día 4) ahora es una pestaña propia, con su propio botón
-  de "Guardar registro" — así se distingue de un día que simplemente no
-  registraste.
-- Cada sección y ejercicio se colapsa solo al completarse.
-- Gráfica simple de actividad de los últimos 14 días en el Historial.
-- El día de hoy se selecciona automáticamente según el calendario (lunes →
-  Día 1, jueves → Descanso, etc.), pero puedes tocar cualquier otro día
-  cuando quieras.
-- Exportar/importar respaldo en JSON, exportar historial en Excel.
+- **Dos planes de entrenamiento**, elegibles desde Configuración:
+  - **Plan 1** — tu rutina original de 6 días (Empuje/Tracción/Pierna x2),
+    conservada como archivo histórico.
+  - **Plan 2** — tu rutina actual de 4 días (Superior/Inferior x2, Miércoles
+    a Domingo) más un día opcional el Jueves. Activo por defecto.
+  - Cambiar de plan sincroniza en tiempo real entre tus teléfonos.
+- **7 temas visuales**, recreados a partir de la paleta real de Sattva:
+  Tema Base, Japonés · Shu, Oro sobre negro, Neumorfismo soft UI,
+  Champán · luz de día, Dorado Solar, Dashboard completo.
+- **Menú (⋮) reorganizado**: ahora abre un pequeño selector con
+  "Configuración" e "Historial", en vez de mezclar todo en una sola hoja.
+  Configuración agrupa cuenta, plan activo, tema, y exportar/importar.
+- **Selector de día sutil**: un botón ovalado discreto con el día y tipo
+  de entrenamiento (ej. "Miércoles · Superior A") — tócalo para cambiar
+  manualmente. La app sigue auto-seleccionando el día real por defecto.
+- **Botón "Terminar entrenamiento"** ya no flota — vive en el flujo normal
+  de la página, justo después de "Estiramiento". Solo se llega a él
+  deslizando hasta el final real de la página.
+- **Cronómetro**: azul mientras cuenta, rojo con alarma continua (sonido +
+  vibración cada 1.6s) al terminar, hasta que la detienes manualmente.
+- **Mostrar/ocultar contraseña** con el ícono de ojo en el login.
+- **Ejercicios opcionales** (antebrazo/trapecio) en los días Superior,
+  en su propia sección, sin contar para el progreso de la sesión.
+- **Sincronización en tiempo real** para historial, configuración
+  (tema/plan) y progreso del día en curso — si marcas algo en un teléfono
+  mientras el mismo día está abierto en el otro, se actualiza solo.

@@ -1,12 +1,12 @@
 // ============================================================
 // Ozren — app.js
 // PWA con Firebase: Authentication (correo/contraseña + Google) + Firestore
-// con caché local persistente — funciona offline y sincroniza sola
-// entre tus dispositivos al volver la conexión.
+// con caché local persistente — funciona offline y sincroniza en tiempo
+// real entre tus dispositivos.
 // ============================================================
 
 import { firebaseConfig } from "./firebase-config.js";
-import { DAY_TYPES, DAYS, DAY_ORDER, REST_DAY, WEEKDAY_TO_DAY } from "./data.js";
+import { PLANS, TEMAS, DAY_TYPE_COLORS, DEFAULT_PLAN_ID } from "./data.js";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
 import {
@@ -34,15 +34,22 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const state = {
   uid: null,
   correo: null,
-  historialCache: [],       // array de sesiones (desc por fecha)
+  historialCache: [],
   unsubHistorial: null,
+  unsubConfig: null,
+  unsubProgresoActual: null,
+  planActivo: DEFAULT_PLAN_ID,
+  tema: "base",
 };
-let currentView = null;        // se define al cargar sesión (auto-hoy)
+let currentView = null;       // dayId activo del plan, "historial" o "config"
 let historyMode = "lista";
 let activeTimerKey = null;
 let timerInterval = null;
 let alarmInterval = null;
 let authMode = "login";
+
+function activePlan() { return PLANS[state.planActivo] || PLANS[DEFAULT_PLAN_ID]; }
+function getDayOrRest(plan, id) { return id === "descanso" ? plan.restDay : plan.days[id]; }
 
 // ============ AUTH UI ============
 function setAuthMode(mode) {
@@ -73,6 +80,15 @@ function traducirErrorAuth(err) {
 function initAuthUI() {
   $("#tab-login").onclick = () => setAuthMode("login");
   $("#tab-register").onclick = () => setAuthMode("register");
+
+  $("#toggle-password").onclick = () => {
+    const input = $("#auth-password");
+    const isHidden = input.type === "password";
+    input.type = isHidden ? "text" : "password";
+    $("#eye-open").classList.toggle("hidden", isHidden);
+    $("#eye-closed").classList.toggle("hidden", !isHidden);
+    $("#toggle-password").setAttribute("aria-label", isHidden ? "Ocultar contraseña" : "Mostrar contraseña");
+  };
 
   $("#auth-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -122,10 +138,11 @@ getRedirectResult(auth).catch((err) => {
   if (el) { el.textContent = traducirErrorAuth(err); el.classList.remove("hidden"); }
 });
 
-async function cerrarSesion() {
-  if (state.unsubHistorial) { state.unsubHistorial(); state.unsubHistorial = null; }
-  await signOut(auth);
+function unsubAll() {
+  [state.unsubHistorial, state.unsubConfig, state.unsubProgresoActual].forEach((u) => u && u());
+  state.unsubHistorial = state.unsubConfig = state.unsubProgresoActual = null;
 }
+async function cerrarSesion() { unsubAll(); await signOut(auth); }
 
 onAuthStateChanged(auth, async (user) => {
   $("#loading").classList.add("hidden");
@@ -134,50 +151,78 @@ onAuthStateChanged(auth, async (user) => {
     state.correo = user.email;
     $("#auth-shell").classList.add("hidden");
     $("#app").classList.remove("hidden");
-    currentView = todayDayId();
     attachHistorialListener();
-    render();
+    attachConfigListener(); // esto dispara el primer render() cuando llega la config
   } else {
     state.uid = null;
-    if (state.unsubHistorial) { state.unsubHistorial(); state.unsubHistorial = null; }
+    unsubAll();
     state.historialCache = [];
+    document.body.removeAttribute("data-theme");
     $("#app").classList.add("hidden");
     $("#auth-shell").classList.remove("hidden");
   }
 });
 
-// ============ FECHA / AUTO-SELECCIÓN DE DÍA ============
+// ============ FECHA ============
 function pad2(n) { return String(n).padStart(2, "0"); }
 function toDateStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
 function todayStr() { return toDateStr(new Date()); }
-function todayDayId() { return WEEKDAY_TO_DAY[new Date().getDay()]; }
+function todayDayId(plan) { return plan.weekdayMap[new Date().getDay()]; }
 
-function getDayOrRest(id) { return id === "descanso" ? REST_DAY : DAYS[id]; }
-
-// ============ FIRESTORE: PROGRESO (borrador en curso) ============
-async function getProgreso(dayId) {
-  if (!state.uid) return null;
+// ============ FIRESTORE: CONFIG (tema + plan activo) — tiempo real ============
+function attachConfigListener() {
+  const ref = doc(db, "usuarios", state.uid, "config", "perfil");
+  let first = true;
+  state.unsubConfig = onSnapshot(ref, (snap) => {
+    const data = snap.exists() ? snap.data() : {};
+    const planCambio = data.planActivo && data.planActivo !== state.planActivo;
+    state.planActivo = data.planActivo || DEFAULT_PLAN_ID;
+    state.tema = data.tema || "base";
+    aplicarTema(state.tema);
+    if (first) {
+      first = false;
+      currentView = todayDayId(activePlan());
+    } else if (planCambio && currentView !== "historial" && currentView !== "config") {
+      currentView = todayDayId(activePlan());
+    }
+    updateSyncPill("synced");
+    render();
+  }, () => updateSyncPill("offline"));
+}
+async function guardarConfig(campo, valor) {
+  updateSyncPill("pending");
   try {
-    const snap = await getDoc(doc(db, "usuarios", state.uid, "progreso", dayId));
-    return snap.exists() ? snap.data() : null;
-  } catch { return null; }
+    await setDoc(doc(db, "usuarios", state.uid, "config", "perfil"), { [campo]: valor }, { merge: true });
+  } catch { updateSyncPill("offline"); }
+}
+function aplicarTema(temaId) {
+  if (temaId === "base") document.body.removeAttribute("data-theme");
+  else document.body.setAttribute("data-theme", temaId);
+}
+
+// ============ FIRESTORE: PROGRESO (borrador en curso) — tiempo real por día ============
+function watchProgreso(dayKey, onData) {
+  if (state.unsubProgresoActual) { state.unsubProgresoActual(); state.unsubProgresoActual = null; }
+  const ref = doc(db, "usuarios", state.uid, "progreso", dayKey);
+  state.unsubProgresoActual = onSnapshot(ref, (snap) => {
+    onData(snap.exists() ? snap.data() : null);
+  }, () => updateSyncPill("offline"));
 }
 let saveProgresoTimeout = null;
-function saveProgreso(dayId, data) {
+function saveProgreso(dayKey, data) {
   if (!state.uid) return;
   clearTimeout(saveProgresoTimeout);
   updateSyncPill("pending");
   saveProgresoTimeout = setTimeout(() => {
-    setDoc(doc(db, "usuarios", state.uid, "progreso", dayId), data)
+    setDoc(doc(db, "usuarios", state.uid, "progreso", dayKey), data)
       .then(() => updateSyncPill("synced"))
       .catch(() => updateSyncPill("offline"));
   }, 400);
 }
-async function clearProgresoRemote(dayId) {
+async function clearProgresoRemote(dayKey) {
   if (!state.uid) return;
-  try { await deleteDoc(doc(db, "usuarios", state.uid, "progreso", dayId)); } catch {}
+  try { await deleteDoc(doc(db, "usuarios", state.uid, "progreso", dayKey)); } catch {}
 }
-
 function updateSyncPill(status) {
   const pill = $("#sync-pill");
   if (!pill) return;
@@ -185,7 +230,7 @@ function updateSyncPill(status) {
   pill.title = status === "synced" ? "Sincronizado" : status === "pending" ? "Guardando…" : "Sin conexión — se guardará al volver";
 }
 
-// ============ FIRESTORE: HISTORIAL ============
+// ============ FIRESTORE: HISTORIAL — tiempo real ============
 function attachHistorialListener() {
   const ref = collection(db, "usuarios", state.uid, "entrenamiento");
   state.unsubHistorial = onSnapshot(ref, (snap) => {
@@ -193,76 +238,83 @@ function attachHistorialListener() {
     snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
     list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     state.historialCache = list;
-    updateSyncPill("synced");
     if (currentView === "historial") render();
   }, () => updateSyncPill("offline"));
 }
 
 // ============ RENDER DISPATCH ============
 function render() {
-  renderDayNav();
+  renderDaySelector();
   const main = $("#main-content");
-  const saveBar = $("#save-bar");
   main.innerHTML = "";
-  if (currentView === "historial") {
-    saveBar.classList.add("hidden");
-    renderHistorial(main);
-  } else if (currentView === "descanso") {
-    renderRestDay(main);
-  } else {
-    saveBar.classList.remove("hidden");
-    renderDay(main, currentView);
+  if (currentView === "historial") renderHistorial(main);
+  else if (currentView === "config") renderConfig(main);
+  else {
+    const plan = activePlan();
+    const dayDef = getDayOrRest(plan, currentView);
+    if (!dayDef) { currentView = todayDayId(plan); return render(); }
+    if (currentView === "descanso") renderRestDay(main, plan, dayDef);
+    else renderDay(main, plan, currentView);
   }
 }
 
-// ============ DAY NAV ============
-function renderDayNav() {
-  const nav = $("#day-nav");
-  nav.innerHTML = "";
-  const today = todayDayId();
-  const allIds = [...DAY_ORDER.slice(0, 3), "descanso", ...DAY_ORDER.slice(3)]; // inserta descanso en su posición real (jueves)
+// ============ MENU (⋮) ============
+$("#btn-menu").onclick = (e) => { e.stopPropagation(); $("#menu-popover").classList.toggle("hidden"); };
+document.addEventListener("click", () => { $("#menu-popover").classList.add("hidden"); });
+$("#btn-go-config").onclick = () => { currentView = "config"; render(); };
+$("#btn-go-historial").onclick = () => { currentView = "historial"; render(); };
+
+// ============ SELECTOR DE DÍA — botón sutil + dropdown ============
+function renderDaySelector() {
+  const wrap = $("#day-selector-wrap");
+  if (currentView === "historial" || currentView === "config") { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+
+  const plan = activePlan();
+  const dayDef = getDayOrRest(plan, currentView);
+  const color = DAY_TYPE_COLORS[dayDef.type] || "#999";
+  const btn = $("#day-selector-btn");
+  btn.innerHTML = `<span class="dsb-dot" style="background:${color}"></span> ${dayDef.label} · ${dayDef.subtitle} <svg class="dsb-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+  btn.onclick = (e) => { e.stopPropagation(); $("#day-dropdown").classList.toggle("hidden"); };
+
+  const dropdown = $("#day-dropdown");
+  dropdown.innerHTML = "";
+  const todayId = todayDayId(plan);
+  const allIds = [...plan.dayOrder.filter((id) => plan.days[id] && !plan.days[id].esOpcional), "descanso", ...plan.dayOrder.filter((id) => plan.days[id] && plan.days[id].esOpcional)];
   allIds.forEach((id) => {
-    const day = getDayOrRest(id);
-    const type = DAY_TYPES[day.type];
-    const btn = document.createElement("button");
-    btn.className = "day-tab" + (currentView === id ? " active" : "");
-    btn.style.setProperty("--tab-color", type.color);
-    const isToday = today === id;
-    btn.innerHTML = `<span class="tab-num">${day.order}</span> <span style="color:${currentView === id ? type.color : ""}">${day.subtitle}</span>${isToday ? '<span class="today-dot"></span>' : ""}`;
-    btn.onclick = () => { currentView = id; render(); };
-    nav.appendChild(btn);
+    const d = getDayOrRest(plan, id);
+    const c = DAY_TYPE_COLORS[d.type] || "#999";
+    const item = document.createElement("button");
+    item.className = "day-dropdown-item" + (currentView === id ? " active" : "");
+    item.innerHTML = `<span class="dd-dot" style="background:${c}"></span> ${d.label} · ${d.subtitle} ${todayId === id ? '<span class="dd-today">HOY</span>' : ""}`;
+    item.onclick = (e) => { e.stopPropagation(); currentView = id; dropdown.classList.add("hidden"); render(); };
+    dropdown.appendChild(item);
   });
-  const histBtn = document.createElement("button");
-  histBtn.className = "day-tab day-tab-history" + (currentView === "historial" ? " active" : "");
-  histBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg> Historial`;
-  histBtn.onclick = () => { currentView = "historial"; render(); };
-  nav.appendChild(histBtn);
 }
+document.addEventListener("click", () => { $("#day-dropdown").classList.add("hidden"); });
 
 // ============ REST DAY VIEW ============
-function renderRestDay(container) {
+function renderRestDay(container, plan, dayDef) {
   const card = document.createElement("div");
   card.className = "rest-card";
   card.innerHTML = `
     <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32 1.41-1.41"/></svg>
-    <h2>Día 4 · Descanso</h2>
-    <p style="color:var(--text-faint); font-size:14px;">Recuperación activa</p>
-    <ul class="rest-tips">${REST_DAY.tips.map(t => `<li>${t}</li>`).join("")}</ul>
+    <h2>${dayDef.label} · ${dayDef.subtitle}</h2>
+    <p style="color:var(--text-faint); font-size:14px;">${dayDef.focus}</p>
+    <ul class="rest-tips">${dayDef.tips.map(t => `<li>${t}</li>`).join("")}</ul>
   `;
   container.appendChild(card);
 
-  const saveBar = $("#save-bar");
-  saveBar.classList.remove("hidden");
-  const btn = $("#btn-complete");
-  const label = $("#btn-complete-label");
+  const wrap = document.createElement("div");
+  wrap.className = "finish-section";
   const already = state.historialCache.find(e => e.date === todayStr() && e.isRestDay);
-  btn.disabled = false;
-  btn.classList.toggle("saved", !!already);
-  label.textContent = already ? "✓ Descanso ya registrado hoy" : "Guardar registro de descanso";
-  btn.onclick = async () => {
+  wrap.innerHTML = `<button class="btn-complete ${already ? "saved" : ""}" id="btn-rest-complete">${already ? "✓ Descanso ya registrado hoy" : "Guardar registro de descanso"}</button>`;
+  container.appendChild(wrap);
+
+  $("#btn-rest-complete").onclick = async () => {
     if (already) return;
-    await setDoc(doc(db, "usuarios", state.uid, "entrenamiento", todayStr()), {
-      dayId: "descanso", dayLabel: "Día 4 · Descanso", dayType: "descanso",
+    await setDoc(doc(db, "usuarios", state.uid, "entrenamiento", `${todayStr()}_${plan.id}_descanso`), {
+      planId: plan.id, dayId: "descanso", dayLabel: `${dayDef.label} · ${dayDef.subtitle}`, dayType: "descanso",
       date: todayStr(), timestamp: new Date().toISOString(),
       isRestDay: true, progressPct: 100, summary: [],
     });
@@ -271,15 +323,24 @@ function renderRestDay(container) {
   };
 }
 
-// ============ DAY VIEW (entrenamiento) ============
-async function renderDay(container, dayId) {
-  const day = DAYS[dayId];
-  const type = DAY_TYPES[day.type];
-  const isToday = todayDayId() === dayId;
+// ============ DAY VIEW (entrenamiento) — tiempo real ============
+function renderDay(container, plan, dayId) {
+  const day = plan.days[dayId];
+  const color = DAY_TYPE_COLORS[day.type] || "#999";
+  const isToday = todayDayId(plan) === dayId;
+  const dayKey = `${plan.id}:${dayId}`;
 
   container.innerHTML = `<p style="color:var(--text-faint); font-size:14px; text-align:center; padding:30px 0;">Cargando…</p>`;
-  const remote = await getProgreso(dayId);
-  const saved = remote || { warmup: [], stretch: [], exercises: {} };
+
+  watchProgreso(dayKey, (remote) => {
+    // Si el usuario ya navegó a otra vista mientras cargaba, no pintamos encima.
+    if (currentView !== dayId) return;
+    const saved = remote || { warmup: [], stretch: [], exercises: {} };
+    pintarDay(container, plan, day, dayId, dayKey, saved, isToday, color);
+  });
+}
+
+function pintarDay(container, plan, day, dayId, dayKey, saved, isToday, color) {
   container.innerHTML = "";
 
   const header = document.createElement("div");
@@ -287,49 +348,59 @@ async function renderDay(container, dayId) {
   header.innerHTML = `
     <div class="day-header-title">
       <h1>${day.label}</h1>
-      <span class="day-type-name" style="color:${type.color}">${day.subtitle}</span>
-      ${isToday ? '<span class="auto-badge">Hoy</span>' : ""}
+      <span class="day-type-name" style="color:${color}">${day.subtitle}</span>
     </div>
     <div class="day-focus">${day.focus}</div>
-    <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%; background:${type.color}"></div></div>
+    <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%; background:${color}"></div></div>
     <div class="progress-label" id="progress-label">0/0 series completadas</div>
   `;
   container.appendChild(header);
 
   container.appendChild(renderCollapsible("🔥 Calentamiento", day.warmup, saved.warmup || [], (idx, checked) => {
     saved.warmup[idx] = checked;
-    saveProgreso(dayId, saved);
-  }, `warmup-${dayId}`));
+    saveProgreso(dayKey, saved);
+  }));
 
   const list = document.createElement("div");
   list.className = "exercise-list";
   day.exercises.forEach((ex, idx) => {
-    list.appendChild(renderExerciseCard(dayId, ex, idx, saved));
+    list.appendChild(renderExerciseCard(dayKey, ex, idx, saved, false));
   });
   container.appendChild(list);
 
-  container.appendChild(renderCollapsible("🧘 Estiramiento final", day.stretch, saved.stretch || [], (idx, checked) => {
+  if (day.opcionales && day.opcionales.length) {
+    const optSection = document.createElement("div");
+    optSection.className = "opcionales-section";
+    optSection.innerHTML = `<div class="opcionales-label">Ejercicios opcionales</div><div class="opcionales-hint">Si te sobra tiempo hoy — no cuentan para el progreso de la sesión.</div>`;
+    const optList = document.createElement("div");
+    optList.className = "exercise-list";
+    day.opcionales.forEach((ex, idx) => {
+      optList.appendChild(renderExerciseCard(dayKey, ex, idx, saved, true));
+    });
+    optSection.appendChild(optList);
+    container.appendChild(optSection);
+  }
+
+  container.appendChild(renderCollapsible("Estiramiento", day.stretch, saved.stretch || [], (idx, checked) => {
     saved.stretch[idx] = checked;
-    saveProgreso(dayId, saved);
-  }, `stretch-${dayId}`));
+    saveProgreso(dayKey, saved);
+  }));
 
-  updateProgress(dayId, saved);
+  const finishWrap = document.createElement("div");
+  finishWrap.className = "finish-section";
+  finishWrap.innerHTML = `<button class="btn-complete" id="btn-complete">Terminar entrenamiento</button>`;
+  container.appendChild(finishWrap);
 
-  const btn = $("#btn-complete");
-  const label = $("#btn-complete-label");
-  btn.classList.remove("saved");
-  label.textContent = "Completar sesión y reiniciar";
-  btn.onclick = () => completeSession(dayId, saved);
+  updateProgress(day, saved);
   updateSaveBarState(saved);
+  $("#btn-complete").onclick = () => completeSession(plan, day, dayId, dayKey, saved);
 }
 
-function renderCollapsible(title, items, savedArr, onToggle, uniqueId) {
+function renderCollapsible(title, items, savedArr, onToggle) {
   const wrap = document.createElement("div");
   wrap.className = "collapsible";
-  wrap.dataset.uid = uniqueId;
   const allDone = items.length > 0 && items.every((_, i) => savedArr[i]);
   if (!allDone) wrap.classList.add("open");
-  else wrap.classList.add("auto-closed");
 
   const summary = document.createElement("div");
   summary.className = "collapsible-summary";
@@ -352,7 +423,7 @@ function renderCollapsible(title, items, savedArr, onToggle, uniqueId) {
       const summarySpan = summary.querySelector("span");
       if (nowAllDone) {
         summarySpan.innerHTML = `${title}<span class="done-tag">✓ Completo</span>`;
-        setTimeout(() => { wrap.classList.remove("open"); }, 450); // auto-colapsa al completar
+        setTimeout(() => { wrap.classList.remove("open"); }, 450);
       } else {
         summarySpan.textContent = title;
       }
@@ -363,8 +434,8 @@ function renderCollapsible(title, items, savedArr, onToggle, uniqueId) {
   return wrap;
 }
 
-function renderExerciseCard(dayId, ex, idx, saved) {
-  const key = `${dayId}-${idx}`;
+function renderExerciseCard(dayKey, ex, idx, saved, esOpcional) {
+  const key = `${esOpcional ? "opt" : "ex"}-${dayKey}-${idx}`;
   let entry = saved.exercises[key];
   if (!entry) {
     entry = ex.unilateral
@@ -387,7 +458,7 @@ function renderExerciseCard(dayId, ex, idx, saved) {
   }
 
   const card = document.createElement("div");
-  card.className = "ex-card" + (isAllDone() ? " done" : "");
+  card.className = "ex-card" + (esOpcional ? " opcional-card" : "") + (isAllDone() ? " done" : "");
 
   const head = document.createElement("div");
   head.className = "ex-head";
@@ -428,12 +499,12 @@ function renderExerciseCard(dayId, ex, idx, saved) {
     head.querySelector(".chev").style.transform = isOpen ? "" : "rotate(180deg)";
   };
 
-  function persist() { saveProgreso(dayId, saved); }
+  function persist() { saveProgreso(dayKey, saved); }
 
   function checkAutoCollapse() {
     refreshHead();
-    updateProgress(dayId, saved);
-    updateSaveBarState(saved);
+    updateProgressFromDom();
+    updateSaveBarFromDom();
     if (isAllDone()) {
       setTimeout(() => { body.style.display = "none"; head.querySelector(".chev").style.transform = ""; }, 500);
     }
@@ -509,7 +580,7 @@ function renderExerciseCard(dayId, ex, idx, saved) {
   return card;
 }
 
-// ============ TIMER — cuenta regresiva azul, alarma continua roja hasta detener manual ============
+// ============ TIMER — azul en cuenta regresiva, alarma roja continua hasta detener manual ============
 function renderTimerChip(key, seconds) {
   const wrap = document.createElement("div");
   wrap.dataset.timerKey = key;
@@ -543,7 +614,6 @@ function startTimer(key, seconds) {
     paintTimer();
   }, 1000);
 }
-
 function paintTimer() {
   const wrap = document.querySelector(`[data-timer-key="${CSS.escape(timerState.key)}"]`);
   if (!wrap) return;
@@ -568,8 +638,6 @@ function paintTimer() {
     buildTimerIdleUI(wrap, wrap.dataset.timerKey, seconds);
   };
 }
-
-// Alarma: suena a volumen alto y se repite sin parar hasta que el usuario presione "reiniciar".
 function startAlarmLoop() {
   playLoudBeep();
   if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]);
@@ -578,16 +646,10 @@ function startAlarmLoop() {
     if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]);
   }, 1600);
 }
-function stopAlarmLoop() {
-  clearInterval(alarmInterval);
-  alarmInterval = null;
-}
+function stopAlarmLoop() { clearInterval(alarmInterval); alarmInterval = null; }
 function playLoudBeep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    // Varias capas de tono para sonar más fuerte y notorio (el volumen final
-    // sigue limitado por el volumen del dispositivo — el navegador no puede
-    // forzar el volumen del sistema por razones de seguridad).
     [0, 0.18, 0.36].forEach((delay) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -601,34 +663,42 @@ function playLoudBeep() {
   } catch (e) {}
 }
 
-// ============ PROGRESS ============
-function computeProgress(dayId, saved) {
-  const day = DAYS[dayId];
-  let total = 0, done = 0;
-  day.exercises.forEach((ex, idx) => {
-    const entry = saved.exercises[`${dayId}-${idx}`];
-    if (!entry) { total += ex.sets; return; }
-    if (!ex.unilateral) {
-      total += ex.sets;
-      done += (entry.checks || []).filter(Boolean).length;
-    } else if (entry.side === "alternado") {
-      total += ex.sets * 2;
-      done += (entry.izquierda || []).filter(Boolean).length + (entry.derecha || []).filter(Boolean).length;
-    } else {
-      total += ex.sets;
-      done += (entry.simul || []).filter(Boolean).length;
-    }
-  });
-  return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+// ============ PROGRESS (helpers que leen del DOM actual, ver nota abajo) ============
+// Nota: como las tarjetas mutan su propio estado en `saved` por closure,
+// recalculamos progreso a partir del mismo objeto `saved` vigente cada vez
+// que algo cambia — ver updateProgress/updateSaveBarState llamados desde
+// pintarDay, y las versiones "FromDom" usadas dentro de cada tarjeta.
+let currentSavedRef = null;
+let currentDayRef = null;
+function updateProgress(day, saved) {
+  currentSavedRef = saved; currentDayRef = day;
+  updateProgressFromDom();
 }
-function updateProgress(dayId, saved) {
-  const { done, total, pct } = computeProgress(dayId, saved);
+function updateProgressFromDom() {
+  if (!currentDayRef || !currentSavedRef) return;
+  const { done, total, pct } = computeProgress(currentDayRef, currentSavedRef);
   const fill = $("#progress-fill");
   const label = $("#progress-label");
   if (fill) fill.style.width = pct + "%";
   if (label) label.textContent = `${done}/${total} series completadas`;
 }
-function updateSaveBarState(saved) {
+function computeProgress(day, saved) {
+  let total = 0, done = 0;
+  const keys = Object.keys(saved.exercises).filter((k) => k.startsWith("ex-"));
+  day.exercises.forEach((ex, idx) => {
+    const matchKey = keys.find((k) => k.endsWith(`-${idx}`) && !k.includes("opt-"));
+    const entry = matchKey ? saved.exercises[matchKey] : null;
+    if (!entry) { total += ex.sets; return; }
+    if (!ex.unilateral) { total += ex.sets; done += (entry.checks || []).filter(Boolean).length; }
+    else if (entry.side === "alternado") { total += ex.sets * 2; done += (entry.izquierda || []).filter(Boolean).length + (entry.derecha || []).filter(Boolean).length; }
+    else { total += ex.sets; done += (entry.simul || []).filter(Boolean).length; }
+  });
+  return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+}
+function updateSaveBarState(saved) { currentSavedRef = saved; updateSaveBarFromDom(); }
+function updateSaveBarFromDom() {
+  if (!currentSavedRef) return;
+  const saved = currentSavedRef;
   const anyProgress = Object.values(saved.exercises || {}).some((e) => {
     if (e.checks) return e.checks.some(Boolean);
     return (e.izquierda || []).some(Boolean) || (e.derecha || []).some(Boolean) || (e.simul || []).some(Boolean);
@@ -638,10 +708,11 @@ function updateSaveBarState(saved) {
 }
 
 // ============ COMPLETAR SESIÓN ============
-async function completeSession(dayId, saved) {
-  const day = DAYS[dayId];
+async function completeSession(plan, day, dayId, dayKey, saved) {
+  const keys = Object.keys(saved.exercises).filter((k) => k.startsWith("ex-"));
   const summary = day.exercises.map((ex, idx) => {
-    const entry = saved.exercises[`${dayId}-${idx}`];
+    const matchKey = keys.find((k) => k.endsWith(`-${idx}`));
+    const entry = matchKey ? saved.exercises[matchKey] : null;
     let done = 0, total = ex.sets;
     if (!entry) { done = 0; }
     else if (!ex.unilateral) { done = (entry.checks || []).filter(Boolean).length; }
@@ -652,20 +723,18 @@ async function completeSession(dayId, saved) {
   const totalSets = summary.reduce((a, s) => a + s.total, 0);
   const doneSets = summary.reduce((a, s) => a + s.done, 0);
   const entryDoc = {
-    dayId, dayLabel: `${day.label} · ${day.subtitle}`, dayType: day.type,
+    planId: plan.id, dayId, dayLabel: `${day.label} · ${day.subtitle}`, dayType: day.type,
     date: todayStr(), timestamp: new Date().toISOString(),
     progressPct: totalSets ? Math.round((doneSets / totalSets) * 100) : 0,
     summary, isRestDay: false,
   };
-  await setDoc(doc(db, "usuarios", state.uid, "entrenamiento", `${todayStr()}_${dayId}`), entryDoc);
-  await clearProgresoRemote(dayId);
+  await setDoc(doc(db, "usuarios", state.uid, "entrenamiento", `${todayStr()}_${dayKey.replace(":", "_")}`), entryDoc);
+  await clearProgresoRemote(dayKey);
 
   const btn = $("#btn-complete");
-  const label = $("#btn-complete-label");
   btn.classList.add("saved");
-  label.textContent = "✓ Guardado en el historial";
+  btn.textContent = "✓ Guardado en el historial";
   showToast("Sesión guardada · plantilla reiniciada");
-  setTimeout(() => { if (currentView === dayId) render(); }, 900);
 }
 
 // ============ HISTORIAL ============
@@ -721,17 +790,13 @@ function renderActivityGraph(hist) {
     const barWrap = document.createElement("div");
     barWrap.className = "activity-bar-wrap";
     const bar = document.createElement("div");
-    if (entries.length === 0) {
-      bar.className = "activity-bar";
-      bar.style.height = "4px";
-    } else if (entries[0].isRestDay) {
-      bar.className = "activity-bar rest";
-      bar.style.height = "100%";
-    } else {
+    if (entries.length === 0) { bar.className = "activity-bar"; bar.style.height = "4px"; }
+    else if (entries[0].isRestDay) { bar.className = "activity-bar rest"; bar.style.height = "100%"; }
+    else {
       const pct = Math.max(entries[0].progressPct, 8);
       bar.className = "activity-bar";
       bar.style.height = pct + "%";
-      bar.style.background = (DAY_TYPES[entries[0].dayType] || {}).color || "var(--accent)";
+      bar.style.background = DAY_TYPE_COLORS[entries[0].dayType] || "var(--accent)";
     }
     barWrap.appendChild(bar);
     const lbl = document.createElement("div");
@@ -748,31 +813,19 @@ function renderActivityGraph(hist) {
 function historyCard(entry) {
   const d = new Date(entry.timestamp || entry.date);
   const fecha = d.toLocaleDateString("es-CO", { weekday: "short", day: "numeric", month: "short" });
-  const type = DAY_TYPES[entry.dayType] || {};
+  const color = DAY_TYPE_COLORS[entry.dayType] || "inherit";
   const card = document.createElement("div");
   card.className = "hist-card" + (entry.isRestDay ? " rest-entry" : "");
   if (entry.isRestDay) {
-    card.innerHTML = `
-      <div class="hist-card-top">
-        <div>
-          <div class="hist-day-name" style="color:${type.color || "inherit"}">😴 Día de descanso</div>
-          <div class="hist-date">${fecha}</div>
-        </div>
-        <div class="hist-pct rest">Registrado</div>
-      </div>`;
+    card.innerHTML = `<div class="hist-card-top"><div><div class="hist-day-name" style="color:${color}">😴 Día de descanso</div><div class="hist-date">${fecha}</div></div><div class="hist-pct rest">Registrado</div></div>`;
     return card;
   }
   card.innerHTML = `
     <div class="hist-card-top">
-      <div>
-        <div class="hist-day-name" style="color:${type.color || "inherit"}">${entry.dayLabel}</div>
-        <div class="hist-date">${fecha}</div>
-      </div>
+      <div><div class="hist-day-name" style="color:${color}">${entry.dayLabel}</div><div class="hist-date">${fecha}</div></div>
       <div class="hist-pct ${entry.progressPct === 100 ? "full" : "partial"}">${entry.progressPct}%</div>
     </div>
-    <div class="hist-chips">
-      ${(entry.summary || []).map(s => `<span class="hist-chip ${s.done < s.total ? "incomplete" : ""}">${s.name.length > 22 ? s.name.slice(0,22)+"…" : s.name} ${s.done}/${s.total}</span>`).join("")}
-    </div>
+    <div class="hist-chips">${(entry.summary || []).map(s => `<span class="hist-chip ${s.done < s.total ? "incomplete" : ""}">${s.name.length > 22 ? s.name.slice(0,22)+"…" : s.name} ${s.done}/${s.total}</span>`).join("")}</div>
   `;
   return card;
 }
@@ -780,7 +833,6 @@ function historyCard(entry) {
 function renderHistorialCalendario(container, hist) {
   const byDate = {};
   hist.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
-
   const now = new Date();
   const year = now.getFullYear(), month = now.getMonth();
   const firstDay = new Date(year, month, 1);
@@ -817,7 +869,7 @@ function renderHistorialCalendario(container, hist) {
       entries.slice(0,3).forEach(e => {
         const dot = document.createElement("span");
         dot.className = "dot";
-        dot.style.background = (DAY_TYPES[e.dayType] || {}).color || "#999";
+        dot.style.background = DAY_TYPE_COLORS[e.dayType] || "#999";
         dotsWrap.appendChild(dot);
       });
       cell.appendChild(dotsWrap);
@@ -834,6 +886,122 @@ function renderHistorialCalendario(container, hist) {
   container.appendChild(detailBox);
 }
 
+// ============ CONFIGURACIÓN ============
+function renderConfig(container) {
+  const h1 = document.createElement("h1");
+  h1.style.cssText = "font-size:21px;font-weight:800;margin:4px 0 18px;";
+  h1.textContent = "Configuración";
+  container.appendChild(h1);
+
+  // --- Cuenta ---
+  const accSec = document.createElement("div");
+  accSec.className = "config-section";
+  accSec.innerHTML = `<div class="config-account">${state.correo || ""}</div>`;
+  const logoutBtn = document.createElement("button");
+  logoutBtn.className = "config-item";
+  logoutBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Cerrar sesión`;
+  logoutBtn.onclick = () => cerrarSesion();
+  accSec.appendChild(logoutBtn);
+  container.appendChild(accSec);
+
+  // --- Plan de entrenamiento ---
+  const planSec = document.createElement("div");
+  planSec.className = "config-section";
+  planSec.innerHTML = `<h2>Plan de entrenamiento</h2><p class="config-sub">Cambia entre tus planes guardados. El día de hoy se recalcula solo al cambiar.</p>`;
+  Object.values(PLANS).forEach((plan) => {
+    const activo = state.planActivo === plan.id;
+    const card = document.createElement("div");
+    card.className = "plan-card" + (activo ? " activo" : "");
+    card.innerHTML = `
+      <div class="plan-card-top">
+        <div class="plan-card-nombre">${plan.nombre}</div>
+        ${activo ? '<span class="plan-card-badge">Activo</span>' : ""}
+      </div>
+      <div class="plan-card-desc">${plan.descripcion}</div>
+    `;
+    card.onclick = () => {
+      if (activo) return;
+      guardarConfig("planActivo", plan.id);
+      showToast(`Cambiado a ${plan.nombre}`);
+    };
+    planSec.appendChild(card);
+  });
+  container.appendChild(planSec);
+
+  // --- Tema visual ---
+  const temaSec = document.createElement("div");
+  temaSec.className = "config-section";
+  temaSec.innerHTML = `<h2>Tema visual</h2><p class="config-sub">Cambia el aspecto de toda la app.</p>`;
+  const grid = document.createElement("div");
+  grid.className = "tema-grid";
+  TEMAS.forEach((t) => {
+    const activo = state.tema === t.id;
+    const btn = document.createElement("button");
+    btn.className = "tema-swatch" + (activo ? " activo" : "");
+    btn.innerHTML = `<span class="ts-dot" style="background:${t.color}"></span><span class="ts-nombre">${t.nombre}</span>${activo ? '<svg class="ts-check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>' : ""}`;
+    btn.onclick = () => { guardarConfig("tema", t.id); };
+    grid.appendChild(btn);
+  });
+  temaSec.appendChild(grid);
+  container.appendChild(temaSec);
+
+  // --- Exportar / Importar ---
+  const dataSec = document.createElement("div");
+  dataSec.className = "config-section";
+  dataSec.innerHTML = `<h2>Tus datos</h2><p class="config-sub">Respaldo manual, además de la sincronización automática.</p>`;
+  dataSec.innerHTML += `
+    <button class="config-item" id="btn-export-json"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Exportar respaldo (JSON)</button>
+    <button class="config-item" id="btn-export-xlsx"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> Exportar historial (Excel)</button>
+    <label class="config-item" for="file-import" style="border-style:dashed;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Importar respaldo (JSON)</label>
+    <input type="file" id="file-import" accept=".json" style="display:none">
+    <button class="config-item danger" id="btn-clear-all"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Borrar todo mi historial</button>
+  `;
+  container.appendChild(dataSec);
+
+  $("#btn-export-json").onclick = () => {
+    const data = { historial: state.historialCache, exportedAt: new Date().toISOString() };
+    downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), `respaldo-ozren-${todayStr()}.json`);
+    showToast("Respaldo JSON descargado");
+  };
+  $("#btn-export-xlsx").onclick = () => {
+    const rows = [];
+    state.historialCache.forEach((e) => {
+      const d = new Date(e.timestamp || e.date);
+      if (e.isRestDay) { rows.push({ Fecha: d.toLocaleDateString("es-CO"), Día: "Descanso", "% Sesión": 100, Ejercicio: "—", "Series completadas": "—", "Series totales": "—" }); return; }
+      (e.summary || []).forEach((s) => { rows.push({ Fecha: d.toLocaleDateString("es-CO"), Día: e.dayLabel, "% Sesión": e.progressPct, Ejercicio: s.name, "Series completadas": s.done, "Series totales": s.total }); });
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Historial");
+    XLSX.writeFile(wb, `historial-ozren-${todayStr()}.xlsx`);
+    showToast("Excel descargado");
+  };
+  $("#file-import").onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!parsed.historial || !Array.isArray(parsed.historial)) throw new Error("formato inválido");
+        for (const entry of parsed.historial) {
+          const id = entry.id || `${entry.date}_${entry.dayId || "x"}`;
+          await setDoc(doc(db, "usuarios", state.uid, "entrenamiento", id), entry);
+        }
+        showToast(`Importado: ${parsed.historial.length} sesiones`);
+      } catch { showToast("Archivo inválido"); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+  $("#btn-clear-all").onclick = async () => {
+    if (!confirm("¿Borrar todo tu historial guardado en la nube? Esta acción no se puede deshacer. Exporta un respaldo antes si no estás seguro.")) return;
+    const snap = await getDocs(collection(db, "usuarios", state.uid, "entrenamiento"));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    showToast("Historial borrado");
+  };
+}
+
 // ============ TOAST ============
 let toastTimeout;
 function showToast(msg) {
@@ -843,77 +1011,6 @@ function showToast(msg) {
   clearTimeout(toastTimeout);
   toastTimeout = setTimeout(() => t.classList.add("hidden"), 2600);
 }
-
-// ============ MENU SHEET ============
-function openSheet() {
-  $("#sheet-account").textContent = state.correo ? `Sesión iniciada: ${state.correo}` : "";
-  $("#menu-sheet").classList.remove("hidden");
-}
-function closeSheet() { $("#menu-sheet").classList.add("hidden"); }
-$("#btn-menu").onclick = openSheet;
-$("#sheet-backdrop").onclick = closeSheet;
-$("#btn-logout").onclick = async () => { closeSheet(); await cerrarSesion(); };
-
-$("#btn-export-json").onclick = () => {
-  const data = { historial: state.historialCache, exportedAt: new Date().toISOString() };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `respaldo-ozren-${todayStr()}.json`);
-  closeSheet();
-  showToast("Respaldo JSON descargado");
-};
-
-$("#btn-export-xlsx").onclick = () => {
-  const rows = [];
-  state.historialCache.forEach((e) => {
-    const d = new Date(e.timestamp || e.date);
-    if (e.isRestDay) {
-      rows.push({ Fecha: d.toLocaleDateString("es-CO"), Día: "Descanso", "% Sesión": 100, Ejercicio: "—", "Series completadas": "—", "Series totales": "—" });
-      return;
-    }
-    (e.summary || []).forEach((s) => {
-      rows.push({
-        Fecha: d.toLocaleDateString("es-CO"), Día: e.dayLabel, "% Sesión": e.progressPct,
-        Ejercicio: s.name, "Series completadas": s.done, "Series totales": s.total,
-      });
-    });
-  });
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Historial");
-  XLSX.writeFile(wb, `historial-ozren-${todayStr()}.xlsx`);
-  closeSheet();
-  showToast("Excel descargado");
-};
-
-$("#file-import").onchange = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async (ev) => {
-    try {
-      const parsed = JSON.parse(ev.target.result);
-      if (!parsed.historial || !Array.isArray(parsed.historial)) throw new Error("formato inválido");
-      for (const entry of parsed.historial) {
-        const id = entry.id || `${entry.date}_${entry.dayId || "x"}`;
-        await setDoc(doc(db, "usuarios", state.uid, "entrenamiento", id), entry);
-      }
-      closeSheet();
-      showToast(`Importado: ${parsed.historial.length} sesiones`);
-    } catch (err) {
-      showToast("Archivo inválido");
-    }
-  };
-  reader.readAsText(file);
-  e.target.value = "";
-};
-
-$("#btn-clear-all").onclick = async () => {
-  if (!confirm("¿Borrar todo tu historial guardado en la nube? Esta acción no se puede deshacer. Exporta un respaldo antes si no estás seguro.")) return;
-  const snap = await getDocs(collection(db, "usuarios", state.uid, "entrenamiento"));
-  await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
-  closeSheet();
-  showToast("Historial borrado");
-};
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
